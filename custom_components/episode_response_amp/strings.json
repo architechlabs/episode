@@ -1,0 +1,353 @@
+{
+  "config": {
+    "flow_title": "Episode Response DSP Amplifier",
+    "step": {
+      "user": {
+        "title": "Connect to Episode Response Amplifier",
+        "description": "Enter the connection details for your Episode Response DSP amplifier. The default TCP port is {default_port}. You can find the IP address in your router's DHCP table or in the amplifier's web interface.",
+        "data": {
+          "host": "Host / IP Address",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The IP address or hostname of your Episode Response amplifier (e.g. 192.168.1.100).",
+          "port": "TCP API port (default: 8080). Only change this if you have configured a custom port.",
+          "username": "Username for the amplifier API (usually 'admin').",
+          "password": "Password for the amplifier API."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "The credentials for your Episode Response amplifier are no longer valid. Please enter updated credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the amplifier. Please check the IP address, port, and that the amplifier is powered on and connected to your network.",
+      "invalid_auth": "Invalid username or password. Please check your credentials.",
+      "account_locked": "Account is locked due to too many failed login attempts. Please wait a few minutes and try again.",
+      "default_password": "The amplifier is still using the default password. Please change it via the amplifier's web interface first, then try again.",
+      "invalid_host": "Please enter a valid IP address or hostname.",
+      "invalid_port": "Port must be between 1 and 65535.",
+      "unknown": "An unexpected error occurred. Please check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This amplifier is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Episode Response Amplifier Options",
+        "description": "Adjust the polling interval for your amplifier. Lower values give faster updates but use more network bandwidth.",
+        "data": {
+          "poll_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "poll_interval": "How often to poll the amplifier for status updates (2–60 seconds). Default: 5 seconds."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {
+        "name": "Temperature"
+      },
+      "status": {
+        "name": "Status"
+      },
+      "firmware": {
+        "name": "Firmware Version"
+      },
+      "volume_db": {
+        "name": "Volume (dB)"
+      }
+    },
+    "select": {
+      "dsp_preset": {
+        "name": "DSP Preset"
+      },
+      "source": {
+        "name": "Source"
+      },
+      "amp_mode": {
+        "name": "Operating Mode"
+      }
+    },
+    "number": {
+      "bass": {
+        "name": "Bass"
+      },
+      "treble": {
+        "name": "Treble"
+      },
+      "balance": {
+        "name": "Balance"
+      },
+      "delay": {
+        "name": "Delay"
+      },
+      "input_gain": {
+        "name": "Input Gain"
+      }
+    },
+    "switch": {
+      "loudness": {
+        "name": "Loudness"
+      },
+      "limiter": {
+        "name": "Limiter"
+      },
+      "bridge": {
+        "name": "Bridge Mode"
+      },
+      "zone_enable": {
+        "name": "Zone Enabled"
+      },
+      "standby": {
+        "name": "Standby"
+      }
+    }
+  },
+  "services": {
+    "set_dsp_preset": {
+      "name": "Set DSP Preset",
+      "description": "Set the DSP sound preset for a specific zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier (optional if only one amp is configured)."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "DSP preset: 0=Flat, 1=Voice, 2=Music, 3=Movie, 4=Loudness, 5–7=Custom."
+        }
+      }
+    },
+    "set_bass": {
+      "name": "Set Bass",
+      "description": "Adjust the bass level for a specific zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Bass level in dB (−12 to +12)."
+        }
+      }
+    },
+    "set_treble": {
+      "name": "Set Treble",
+      "description": "Adjust the treble level for a specific zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Treble level in dB (−12 to +12)."
+        }
+      }
+    },
+    "set_balance": {
+      "name": "Set Balance",
+      "description": "Adjust the stereo balance for a specific zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Balance (−20 = full left, 0 = center, +20 = full right)."
+        }
+      }
+    },
+    "set_input_gain": {
+      "name": "Set Input Gain",
+      "description": "Adjust the gain for a specific analog input.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "input": {
+          "name": "Input",
+          "description": "Input number (0–5)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Gain in dB (−12 to +12)."
+        }
+      }
+    },
+    "set_loudness": {
+      "name": "Set Loudness",
+      "description": "Enable or disable loudness compensation for a zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether to enable loudness compensation."
+        }
+      }
+    },
+    "set_delay": {
+      "name": "Set Delay",
+      "description": "Set the audio delay for a specific zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Delay in milliseconds (0–1000)."
+        }
+      }
+    },
+    "set_bridge": {
+      "name": "Set Bridge Mode",
+      "description": "Enable or disable bridge mode for a zone (combines two channels into one mono output at higher power).",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether to enable bridge mode."
+        }
+      }
+    },
+    "set_limiter": {
+      "name": "Set Limiter",
+      "description": "Enable or disable the output limiter for a zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether to enable the limiter."
+        }
+      }
+    },
+    "reboot": {
+      "name": "Reboot Amplifier",
+      "description": "Reboot the Episode Response amplifier. The amplifier will be temporarily unavailable.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        }
+      }
+    },
+    "factory_reset": {
+      "name": "Factory Reset",
+      "description": "Reset the amplifier to factory defaults. WARNING: This cannot be undone. All settings, zone names, and network configuration will be lost.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        }
+      }
+    },
+    "set_amp_name": {
+      "name": "Set Amplifier Name",
+      "description": "Change the display name of the amplifier.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "name": {
+          "name": "Name",
+          "description": "New name for the amplifier."
+        }
+      }
+    },
+    "set_output_name": {
+      "name": "Set Zone Name",
+      "description": "Change the display name of a specific output zone.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone number (0–5)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "New name for the zone."
+        }
+      }
+    },
+    "set_input_name": {
+      "name": "Set Input Name",
+      "description": "Change the display name of a specific analog input.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "The config entry ID of the amplifier."
+        },
+        "input": {
+          "name": "Input",
+          "description": "Input number (0–5)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "New name for the input."
+        }
+      }
+    }
+  }
+}

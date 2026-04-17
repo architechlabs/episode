@@ -1,0 +1,342 @@
+set_dsp_preset:
+  name: Set DSP Preset
+  description: Set the DSP sound preset for a specific zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    preset:
+      name: Preset
+      description: "DSP preset index: 0=Flat, 1=Voice, 2=Music, 3=Movie, 4=Loudness, 5-7=Custom."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 7
+          mode: box
+
+set_bass:
+  name: Set Bass
+  description: Adjust the bass level for a specific zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    value:
+      name: Value
+      description: Bass level in dB (-12 to 12).
+      required: true
+      selector:
+        number:
+          min: -12
+          max: 12
+          mode: slider
+
+set_treble:
+  name: Set Treble
+  description: Adjust the treble level for a specific zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    value:
+      name: Value
+      description: Treble level in dB (-12 to 12).
+      required: true
+      selector:
+        number:
+          min: -12
+          max: 12
+          mode: slider
+
+set_balance:
+  name: Set Balance
+  description: Adjust the stereo balance for a specific zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    value:
+      name: Value
+      description: Balance (-20=full left, 0=center, 20=full right).
+      required: true
+      selector:
+        number:
+          min: -20
+          max: 20
+          mode: slider
+
+set_input_gain:
+  name: Set Input Gain
+  description: Adjust the gain for a specific analog input.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    input:
+      name: Input
+      description: Input index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    value:
+      name: Value
+      description: Gain in dB (-12 to 12).
+      required: true
+      selector:
+        number:
+          min: -12
+          max: 12
+          mode: slider
+
+set_loudness:
+  name: Set Loudness
+  description: Enable or disable loudness compensation for a zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    enabled:
+      name: Enabled
+      description: Enable loudness compensation.
+      required: true
+      selector:
+        boolean:
+
+set_delay:
+  name: Set Delay
+  description: Set the audio delay for a specific zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    value:
+      name: Value
+      description: Delay in milliseconds (0-1000).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
+set_bridge:
+  name: Set Bridge Mode
+  description: Enable or disable bridge mode for a zone (mono bridged output).
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    enabled:
+      name: Enabled
+      description: Enable bridge mode.
+      required: true
+      selector:
+        boolean:
+
+set_limiter:
+  name: Set Limiter
+  description: Enable or disable the output limiter for a zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    enabled:
+      name: Enabled
+      description: Enable the limiter.
+      required: true
+      selector:
+        boolean:
+
+reboot:
+  name: Reboot Amplifier
+  description: Reboot the Episode Response amplifier.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+
+factory_reset:
+  name: Factory Reset
+  description: Factory reset the Episode Response amplifier. WARNING — This cannot be undone!
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+
+set_amp_name:
+  name: Set Amplifier Name
+  description: Change the amplifier's display name.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    name:
+      name: Name
+      description: New name for the amplifier.
+      required: true
+      selector:
+        text:
+
+set_output_name:
+  name: Set Zone Name
+  description: Change the name of a specific output zone.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    name:
+      name: Name
+      description: New name for the zone.
+      required: true
+      selector:
+        text:
+
+set_input_name:
+  name: Set Input Name
+  description: Change the name of a specific analog input.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    input:
+      name: Input
+      description: Input index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    name:
+      name: Name
+      description: New name for the input.
+      required: true
+      selector:
+        text:

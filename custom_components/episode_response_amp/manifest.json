@@ -1,0 +1,14 @@
+{
+  "domain": "episode_response_amp",
+  "name": "Episode Response DSP Amplifier",
+  "codeowners": ["@architechlabs"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/architechlabs/episode",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/architechlabs/episode/issues",
+  "requirements": [],
+  "version": "1.0.0",
+  "integration_type": "hub",
+  "loggers": ["custom_components.episode_response_amp"]
+}
