@@ -68,7 +68,24 @@ class EpisodeResponseCoordinator(DataUpdateCoordinator[AmplifierState]):
         """Fetch the latest state from the amplifier.
 
         Called automatically on the poll interval by HA's DataUpdateCoordinator.
+
+        If the connection was lost since the last poll, reconnects inline before
+        polling.  This gives fast recovery (within the next poll interval, default
+        5 s) without the long exponential-back-off delays of a background reconnect
+        loop that can leave entities unavailable for minutes.
         """
+        # Reconnect inline if the connection was lost since the last poll.
+        if not self.client.connected:
+            try:
+                _LOGGER.debug("Amplifier not connected — reconnecting before poll")
+                await self.client.reconnect()
+            except AuthenticationFailed as err:
+                raise ConfigEntryAuthFailed(
+                    f"Authentication failed during reconnect: {err}"
+                ) from err
+            except Exception as err:  # noqa: BLE001
+                raise UpdateFailed(f"Cannot reconnect to amplifier: {err}") from err
+
         try:
             state = await self.client.poll_full_state()
             return state

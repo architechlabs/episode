@@ -44,8 +44,11 @@ class EpisodeResponseEntity(CoordinatorEntity[EpisodeResponseCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Return True if the amplifier is connected."""
-        return (
-            super().available
-            and self.coordinator.client.connected
-        )
+        """Return True when the coordinator has fresh data from the amplifier.
+
+        CoordinatorEntity.available already returns False when the last update
+        failed, so there is no need to additionally gate on the client's
+        transport-level connected flag (which can be transiently False between
+        polls even while data is stale-but-valid).
+        """
+        return super().available

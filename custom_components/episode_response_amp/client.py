@@ -184,9 +184,6 @@ class EpisodeResponseClient:
             if self._on_connected:
                 self._on_connected()
 
-            # Start heartbeat
-            self._start_heartbeat()
-
         except AuthenticationFailed:
             self.state.connected = False
             await self._close_transport()
@@ -430,23 +427,28 @@ class EpisodeResponseClient:
                     f"Command timed out after {command_timeout} seconds"
                 )
                 self._consecutive_failures += 1
-                _LOGGER.warning(
-                    "Command failed (%s, attempt %d), scheduling reconnect: %s",
-                    type(timeout_err).__name__,
+                _LOGGER.debug(
+                    "Command timed out (attempt %d): %s",
                     self._consecutive_failures,
                     timeout_err,
                 )
-                self._schedule_reconnect()
+                # Mark the connection dead so the coordinator will reconnect
+                # on the next poll cycle instead of waiting for a background
+                # reconnect loop with exponential back-off.
+                self._connected = False
+                self._authenticated = False
+                await self._close_transport()
                 raise timeout_err from err
             except (OSError, ConnectionError, CommandTimeout, ConnectionFailed) as err:
                 self._consecutive_failures += 1
-                _LOGGER.warning(
-                    "Command failed (%s, attempt %d), scheduling reconnect: %s",
-                    type(err).__name__,
+                _LOGGER.debug(
+                    "Command failed (attempt %d): %s",
                     self._consecutive_failures,
                     err,
                 )
-                self._schedule_reconnect()
+                self._connected = False
+                self._authenticated = False
+                await self._close_transport()
                 raise
 
             status = response.get("status", 200)
@@ -471,12 +473,16 @@ class EpisodeResponseClient:
                         timeout=command_timeout,
                     )
                 except asyncio.TimeoutError as err:
-                    self._schedule_reconnect()
+                    self._connected = False
+                    self._authenticated = False
+                    await self._close_transport()
                     raise ConnectionFailed(
                         f"Retry after re-auth timed out after {command_timeout} seconds"
                     ) from err
                 except Exception as err:
-                    self._schedule_reconnect()
+                    self._connected = False
+                    self._authenticated = False
+                    await self._close_transport()
                     raise ConnectionFailed("Retry after re-auth failed") from err
 
             # Update the state's last status code
@@ -496,6 +502,8 @@ class EpisodeResponseClient:
             try:
                 resp = await self.send_command({"type": cmd_type})
                 results[cmd_type] = resp
+            except (ConnectionFailed, CommandTimeout):
+                raise  # propagate connection errors so poll fails fast
             except EpisodeAmpError as err:
                 _LOGGER.debug("Could not fetch %s: %s", cmd_type, err)
         return results
@@ -505,6 +513,8 @@ class EpisodeResponseClient:
         try:
             resp = await self.send_command({"type": CMD_GET_TEMPERATURE})
             return resp.get("value")
+        except (ConnectionFailed, CommandTimeout):
+            raise  # propagate so the poll fails and triggers reconnect
         except EpisodeAmpError:
             return None
 
@@ -786,6 +796,8 @@ class EpisodeResponseClient:
         try:
             self.state.standby = await self.get_standby()
             self.state.mode = await self.get_mode()
+        except (ConnectionFailed, CommandTimeout):
+            raise  # propagate — connection is dead, abort this poll
         except EpisodeAmpError as err:
             _LOGGER.debug("Could not poll standby/mode: %s", err)
 
@@ -816,6 +828,8 @@ class EpisodeResponseClient:
                 zone.delay = await self.get_zone_delay(zone_idx)
                 zone.limiter = await self.get_zone_limiter(zone_idx)
                 zone.bridge = await self.get_zone_bridge(zone_idx)
+            except (ConnectionFailed, CommandTimeout):
+                raise  # dead connection — abort poll immediately
             except EpisodeAmpError as err:
                 _LOGGER.debug("Error polling zone %d: %s", zone_idx, err)
 
@@ -823,6 +837,8 @@ class EpisodeResponseClient:
         for zone_idx in range(6):
             try:
                 self.state.zones[zone_idx].name = await self.get_output_name(zone_idx)
+            except (ConnectionFailed, CommandTimeout):
+                raise
             except EpisodeAmpError:
                 pass
 
@@ -831,6 +847,8 @@ class EpisodeResponseClient:
             try:
                 self.state.inputs[inp_idx].name = await self.get_input_name(inp_idx)
                 self.state.inputs[inp_idx].gain = await self.get_input_gain(inp_idx)
+            except (ConnectionFailed, CommandTimeout):
+                raise
             except EpisodeAmpError:
                 pass
 
@@ -857,30 +875,22 @@ class EpisodeResponseClient:
     # ------------------------------------------------------------------
 
     def _start_heartbeat(self) -> None:
-        """Start the heartbeat background task."""
-        self._cancel_heartbeat()
-        self._heartbeat_task = asyncio.ensure_future(self._heartbeat_loop())
+        """No-op: persistent heartbeat is disabled.
+
+        The coordinator reconnects inline before each poll, which makes a
+        background keep-alive unnecessary and avoids the exponential-backoff
+        death spiral that occurs when the device drops an idle connection.
+        """
 
     def _cancel_heartbeat(self) -> None:
-        """Cancel the heartbeat task."""
+        """Cancel any lingering heartbeat task (kept for backwards compatibility)."""
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
         self._heartbeat_task = None
 
     async def _heartbeat_loop(self) -> None:
-        """Periodically send a lightweight command to keep the connection alive."""
-        while self._connected and not self._closing:
-            try:
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
-                if self._connected and self._authenticated:
-                    await self.send_command({"type": "get_standby"})
-            except asyncio.CancelledError:
-                return
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Heartbeat failed: %s", err)
-                if not self._closing:
-                    self._schedule_reconnect()
-                return
+        """No-op: heartbeat disabled — coordinator handles reconnection."""
+        return
 
     # ------------------------------------------------------------------
     # Reconnect logic with exponential backoff
