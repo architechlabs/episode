@@ -56,6 +56,41 @@ _LOGGER = logging.getLogger(__name__)
 READ_BUFFER_SIZE = 8192
 
 
+# ---------------------------------------------------------------------------
+# Response-parsing helpers
+#
+# The Episode firmware sends BULK responses: querying any indexed property
+# (e.g. get_outputvol with index=0) returns ALL values as a list:
+#   {"value": [{"index": 0, "value": -20}, {"index": 1, "value": -40}, …]}
+# These helpers normalise both shapes so callers always receive a scalar.
+# ---------------------------------------------------------------------------
+
+def _extract_indexed(resp: dict[str, Any], index: int, default: Any) -> Any:
+    """Return the value for a specific index from a bulk or scalar response."""
+    value = resp.get("value", default)
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict) and item.get("index") == index:
+                return item.get("value", default)
+        return default
+    return value
+
+
+def _extract_all_indexed(resp: dict[str, Any]) -> dict[int, Any]:
+    """Return {index: value} for every entry in a bulk response.
+
+    Returns an empty dict for scalar / non-list responses.
+    """
+    value = resp.get("value")
+    if isinstance(value, list):
+        return {
+            item["index"]: item["value"]
+            for item in value
+            if isinstance(item, dict) and "index" in item and "value" in item
+        }
+    return {}
+
+
 class EpisodeResponseClient:
     """Persistent async TCP client for Episode Response amplifiers."""
 
@@ -583,7 +618,7 @@ class EpisodeResponseClient:
             "type": "get_outputvol",
             "index": zone,
         })
-        return resp.get("value", -80)
+        return int(_extract_indexed(resp, zone, -80))
 
     async def set_zone_mute(self, zone: int, muted: bool) -> dict[str, Any]:
         """Set zone mute state."""
@@ -599,7 +634,7 @@ class EpisodeResponseClient:
             "type": "get_muteoutput",
             "index": zone,
         })
-        return bool(resp.get("value", 0))
+        return bool(_extract_indexed(resp, zone, 0))
 
     async def set_zone_source(self, zone: int, source: int, *, channel: int = 1) -> dict[str, Any]:
         """Set zone source input (channel 1 or 2)."""
@@ -617,7 +652,7 @@ class EpisodeResponseClient:
             "type": cmd,
             "index": zone,
         })
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_enable(self, zone: int, enabled: bool) -> dict[str, Any]:
         """Enable or disable a zone."""
@@ -633,7 +668,7 @@ class EpisodeResponseClient:
             "type": "get_outputenable",
             "index": zone,
         })
-        return bool(resp.get("value", 1))
+        return bool(_extract_indexed(resp, zone, 1))
 
     async def set_zone_dsp_preset(self, zone: int, preset: int) -> dict[str, Any]:
         """Set zone DSP preset."""
@@ -649,7 +684,7 @@ class EpisodeResponseClient:
             "type": "get_dsppreset",
             "index": zone,
         })
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_bass(self, zone: int, value: int) -> dict[str, Any]:
         """Set zone bass (-12..12 dB)."""
@@ -662,7 +697,7 @@ class EpisodeResponseClient:
     async def get_zone_bass(self, zone: int) -> int:
         """Get zone bass value."""
         resp = await self.send_command({"type": "get_bass", "index": zone})
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_treble(self, zone: int, value: int) -> dict[str, Any]:
         """Set zone treble (-12..12 dB)."""
@@ -675,7 +710,7 @@ class EpisodeResponseClient:
     async def get_zone_treble(self, zone: int) -> int:
         """Get zone treble value."""
         resp = await self.send_command({"type": "get_treble", "index": zone})
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_balance(self, zone: int, value: int) -> dict[str, Any]:
         """Set zone balance (-20..20)."""
@@ -688,7 +723,7 @@ class EpisodeResponseClient:
     async def get_zone_balance(self, zone: int) -> int:
         """Get zone balance."""
         resp = await self.send_command({"type": "get_balance", "index": zone})
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_loudness(self, zone: int, enabled: bool) -> dict[str, Any]:
         """Set zone loudness compensation."""
@@ -701,7 +736,7 @@ class EpisodeResponseClient:
     async def get_zone_loudness(self, zone: int) -> bool:
         """Get zone loudness state."""
         resp = await self.send_command({"type": "get_loudness", "index": zone})
-        return bool(resp.get("value", 0))
+        return bool(_extract_indexed(resp, zone, 0))
 
     async def set_zone_delay(self, zone: int, value: int) -> dict[str, Any]:
         """Set zone delay (ms)."""
@@ -714,7 +749,7 @@ class EpisodeResponseClient:
     async def get_zone_delay(self, zone: int) -> int:
         """Get zone delay (ms)."""
         resp = await self.send_command({"type": "get_delay", "index": zone})
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, zone, 0))
 
     async def set_zone_limiter(self, zone: int, enabled: bool) -> dict[str, Any]:
         """Set zone limiter."""
@@ -727,7 +762,7 @@ class EpisodeResponseClient:
     async def get_zone_limiter(self, zone: int) -> bool:
         """Get zone limiter state."""
         resp = await self.send_command({"type": "get_limiter", "index": zone})
-        return bool(resp.get("value", 0))
+        return bool(_extract_indexed(resp, zone, 0))
 
     async def set_zone_bridge(self, zone: int, enabled: bool) -> dict[str, Any]:
         """Set zone bridge mode."""
@@ -740,7 +775,7 @@ class EpisodeResponseClient:
     async def get_zone_bridge(self, zone: int) -> bool:
         """Get zone bridge mode."""
         resp = await self.send_command({"type": "get_bridge", "index": zone})
-        return bool(resp.get("value", 0))
+        return bool(_extract_indexed(resp, zone, 0))
 
     async def set_standby(self, standby: bool) -> dict[str, Any]:
         """Set amplifier standby mode."""
@@ -789,7 +824,7 @@ class EpisodeResponseClient:
     async def get_output_name(self, zone: int) -> str:
         """Get zone/output name."""
         resp = await self.send_command({"type": "get_outputname", "index": zone})
-        return resp.get("value", f"Zone {zone + 1}")
+        return str(_extract_indexed(resp, zone, f"Zone {zone + 1}"))
 
     async def set_input_name(self, index: int, name: str) -> dict[str, Any]:
         """Set input name."""
@@ -802,7 +837,7 @@ class EpisodeResponseClient:
     async def get_input_name(self, index: int) -> str:
         """Get input name."""
         resp = await self.send_command({"type": "get_inputname", "index": index})
-        return resp.get("value", f"Input {index + 1}")
+        return str(_extract_indexed(resp, index, f"Input {index + 1}"))
 
     async def set_input_gain(self, index: int, gain: int) -> dict[str, Any]:
         """Set input gain."""
@@ -815,7 +850,7 @@ class EpisodeResponseClient:
     async def get_input_gain(self, index: int) -> int:
         """Get input gain."""
         resp = await self.send_command({"type": "get_inputgain", "index": index})
-        return resp.get("value", 0)
+        return int(_extract_indexed(resp, index, 0))
 
     async def reboot(self) -> dict[str, Any]:
         """Reboot the amplifier."""
@@ -832,78 +867,107 @@ class EpisodeResponseClient:
     async def poll_full_state(self) -> AmplifierState:
         """Poll all zone and amplifier state. Used by the coordinator.
 
-        When the amplifier is in standby, only basic status is polled
-        to reduce unnecessary network traffic.
+        The Episode firmware returns bulk (all-zone) responses regardless of the
+        index in the request, so each property is queried with a single command
+        and all 6 zone values are parsed from the one response.  This reduces
+        round-trips from ~100 to ~16 per poll cycle.
         """
         if not self.connected:
             raise ConnectionFailed("Not connected to amplifier")
 
-        # NOTE: Identity commands (get_ampname, get_firmware, get_mac,
-        # get_serial) are intentionally NOT polled here.  On many Episode
-        # firmware versions the device never sends a response to those
-        # commands, which would time out every first poll and block all
-        # zone data.  _fetch_amp_identity() is still available for callers
-        # that want to probe identity out-of-band after a successful poll.
-
-        # Standby / mode — always poll these
+        # Global state — always poll
         try:
             self.state.standby = await self.get_standby()
             self.state.mode = await self.get_mode()
         except (ConnectionFailed, CommandTimeout):
-            raise  # propagate — connection is dead, abort this poll
+            raise
         except EpisodeAmpError as err:
             _LOGGER.debug("Could not poll standby/mode: %s", err)
 
-        # Temperature — always poll
         self.state.temperature = await self.get_temperature()
 
-        # If in standby, skip detailed zone/input polling to reduce traffic
         if self.state.standby:
-            _LOGGER.debug("Amplifier in standby — skipping detailed zone poll")
+            _LOGGER.debug("Amplifier in standby — skipping zone poll")
             if self._on_state_update:
                 self._on_state_update(self.state)
             return self.state
 
-        # Zone state
-        for zone_idx in range(6):
-            zone = self.state.zones[zone_idx]
+        # ------------------------------------------------------------------
+        # Bulk zone property poll.
+        # One request per property → device replies with all 6 zone values.
+        # Tuple: (API command, ZoneState attribute, default, type coercion)
+        # ------------------------------------------------------------------
+        _ZONE_PROPS: list[tuple[str, str, Any, type]] = [
+            ("get_outputvol",     "volume_db",  -80,   int),
+            ("get_muteoutput",    "muted",      False, bool),
+            ("get_outputsource1", "source1",    0,     int),
+            ("get_outputsource2", "source2",    0,     int),
+            ("get_outputenable",  "enabled",    True,  bool),
+            ("get_dsppreset",     "dsp_preset", 0,     int),
+            ("get_bass",          "bass",       0,     int),
+            ("get_treble",        "treble",     0,     int),
+            ("get_balance",       "balance",    0,     int),
+            ("get_loudness",      "loudness",   False, bool),
+            ("get_delay",         "delay",      0,     int),
+            ("get_limiter",       "limiter",    False, bool),
+            ("get_bridge",        "bridge",     False, bool),
+        ]
+
+        for cmd_type, attr, default, coerce in _ZONE_PROPS:
             try:
-                zone.volume_db = await self.get_zone_volume(zone_idx)
-                zone.muted = await self.get_zone_mute(zone_idx)
-                zone.source1 = await self.get_zone_source(zone_idx, channel=1)
-                zone.source2 = await self.get_zone_source(zone_idx, channel=2)
-                zone.enabled = await self.get_zone_enable(zone_idx)
-                zone.dsp_preset = await self.get_zone_dsp_preset(zone_idx)
-                zone.bass = await self.get_zone_bass(zone_idx)
-                zone.treble = await self.get_zone_treble(zone_idx)
-                zone.balance = await self.get_zone_balance(zone_idx)
-                zone.loudness = await self.get_zone_loudness(zone_idx)
-                zone.delay = await self.get_zone_delay(zone_idx)
-                zone.limiter = await self.get_zone_limiter(zone_idx)
-                zone.bridge = await self.get_zone_bridge(zone_idx)
+                resp = await self.send_command({"type": cmd_type})
+                values = _extract_all_indexed(resp)
+                for zone_idx in range(6):
+                    raw = values.get(zone_idx, default)
+                    try:
+                        setattr(self.state.zones[zone_idx], attr, coerce(raw))
+                    except (TypeError, ValueError):
+                        setattr(self.state.zones[zone_idx], attr, default)
             except (ConnectionFailed, CommandTimeout):
-                raise  # dead connection — abort poll immediately
+                raise
             except EpisodeAmpError as err:
-                _LOGGER.debug("Error polling zone %d: %s", zone_idx, err)
+                _LOGGER.debug("Bulk poll %s failed: %s", cmd_type, err)
 
-        # Zone names
-        for zone_idx in range(6):
-            try:
-                self.state.zones[zone_idx].name = await self.get_output_name(zone_idx)
-            except (ConnectionFailed, CommandTimeout):
-                raise
-            except EpisodeAmpError:
-                pass
+        # Zone names — one request, all 6 names
+        try:
+            resp = await self.send_command({"type": "get_outputname"})
+            names = _extract_all_indexed(resp)
+            for zone_idx in range(6):
+                raw = names.get(zone_idx)
+                if isinstance(raw, str) and raw:
+                    self.state.zones[zone_idx].name = raw
+        except (ConnectionFailed, CommandTimeout):
+            raise
+        except EpisodeAmpError:
+            pass
 
-        # Input names & gain
-        for inp_idx in range(6):
-            try:
-                self.state.inputs[inp_idx].name = await self.get_input_name(inp_idx)
-                self.state.inputs[inp_idx].gain = await self.get_input_gain(inp_idx)
-            except (ConnectionFailed, CommandTimeout):
-                raise
-            except EpisodeAmpError:
-                pass
+        # Input names — one request, all 6 names
+        try:
+            resp = await self.send_command({"type": "get_inputname"})
+            names = _extract_all_indexed(resp)
+            for inp_idx in range(6):
+                raw = names.get(inp_idx)
+                if isinstance(raw, str) and raw:
+                    self.state.inputs[inp_idx].name = raw
+        except (ConnectionFailed, CommandTimeout):
+            raise
+        except EpisodeAmpError:
+            pass
+
+        # Input gains — one request, all 6 gains
+        try:
+            resp = await self.send_command({"type": "get_inputgain"})
+            gains = _extract_all_indexed(resp)
+            for inp_idx in range(6):
+                raw = gains.get(inp_idx, 0)
+                try:
+                    self.state.inputs[inp_idx].gain = int(raw)
+                except (TypeError, ValueError):
+                    pass
+        except (ConnectionFailed, CommandTimeout):
+            raise
+        except EpisodeAmpError:
+            pass
 
         if self._on_state_update:
             self._on_state_update(self.state)
