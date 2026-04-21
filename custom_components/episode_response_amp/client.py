@@ -377,7 +377,7 @@ class EpisodeResponseClient:
             try:
                 chunk = await asyncio.wait_for(
                     self._reader.read(READ_BUFFER_SIZE),
-                    timeout=max(COMMAND_TIMEOUT + 2, 10),
+                    timeout=COMMAND_TIMEOUT + 3,
                 )
             except asyncio.TimeoutError as err:
                 # Some stacks send one JSON payload without delimiters.
@@ -420,7 +420,9 @@ class EpisodeResponseClient:
         asyncio.Lock so only one command is in-flight at a time.
         """
         async with self._cmd_lock:
-            command_timeout = max(COMMAND_TIMEOUT + 2, 8)
+            # Give the device COMMAND_TIMEOUT + 5 s total; inner per-chunk
+            # read uses COMMAND_TIMEOUT + 3 s so it fires before this wrapper.
+            command_timeout = COMMAND_TIMEOUT + 5
             try:
                 response = await asyncio.wait_for(
                     self._send_and_receive(payload),
@@ -802,32 +804,12 @@ class EpisodeResponseClient:
         if not self.connected:
             raise ConnectionFailed("Not connected to amplifier")
 
-        # ----------------------------------------------------------------
-        # Identity fetch — attempted at most once per client instance.
-        #
-        # Many Episode firmware versions do not respond to identity commands
-        # (get_ampname / get_firmware / get_mac / get_serial).  A failed fetch
-        # closes the transport; we reconnect inline before continuing zone
-        # polling so a missing feature does not block state updates.
-        # ----------------------------------------------------------------
-        if not self._identity_attempted:
-            self._identity_attempted = True
-            try:
-                # Generous timeout: login itself can take up to 10 s, so give
-                # identity the same headroom for all four commands.
-                await asyncio.wait_for(self._fetch_amp_identity(), timeout=20.0)
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Identity fetch skipped (device may not support it): %s", err)
-
-            # Reconnect if the identity probe destroyed the transport.
-            if not self.connected:
-                _LOGGER.debug("Reconnecting after identity probe…")
-                try:
-                    await self.connect()
-                except Exception as err:  # noqa: BLE001
-                    raise ConnectionFailed(
-                        f"Cannot reconnect after identity probe: {err}"
-                    ) from err
+        # NOTE: Identity commands (get_ampname, get_firmware, get_mac,
+        # get_serial) are intentionally NOT polled here.  On many Episode
+        # firmware versions the device never sends a response to those
+        # commands, which would time out every first poll and block all
+        # zone data.  _fetch_amp_identity() is still available for callers
+        # that want to probe identity out-of-band after a successful poll.
 
         # Standby / mode — always poll these
         try:
