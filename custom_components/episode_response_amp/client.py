@@ -335,12 +335,25 @@ class EpisodeResponseClient:
         await self._writer.drain()
 
     async def _read_message(self) -> dict[str, Any]:
-        """Read a NULL-terminated JSON message from the socket."""
+        """Read a framed or unframed JSON message from the socket.
+
+        Supports three framing styles used by Episode firmware:
+          1. NULL-terminated  (\\x00 after JSON)  — vendor spec
+          2. Newline-terminated (\\n after JSON)  — some builds
+          3. Unframed — a complete JSON object sent as a single TCP segment
+             with no trailing byte at all.  This is what current firmware does.
+
+        The critical optimisation for style 3: after every successful read()
+        we immediately attempt a JSON parse of the entire buffer.  Without
+        this the loop would go back and call read() again, wait the full
+        COMMAND_TIMEOUT for more bytes that never arrive, then finally parse
+        on the TimeoutError path — costing ~8–23 s per command.
+        """
         if self._reader is None:
             raise ConnectionFailed("Not connected")
 
         while True:
-            # Check buffer for complete message (NULL-terminated or line-delimited)
+            # ------ 1. Check for a properly framed message in the buffer ------
             null_idx = self._read_buffer.find(NULL_TERMINATOR)
             newline_idx = self._read_buffer.find(b"\n")
             msg_end = -1
@@ -370,17 +383,37 @@ class EpisodeResponseClient:
                             err,
                             msg_str[:200],
                         )
-                        continue
-                continue  # empty message, keep reading
+                continue  # empty or unparseable, keep reading
 
-            # Need more data
+            # ------ 2. Try to parse the buffer as unframed JSON ------
+            # Do this BEFORE waiting for more data.  If the device sent a
+            # complete, well-formed JSON object in one TCP segment (no
+            # terminator), we get the answer here in <1 ms instead of
+            # burning the full COMMAND_TIMEOUT waiting for bytes that will
+            # never come.
+            if self._read_buffer:
+                candidate = self._read_buffer.decode("utf-8", errors="ignore").strip()
+                if candidate:
+                    if candidate.startswith("HTTP/"):
+                        raise ConnectionFailed(
+                            "Configured port appears to be an HTTP service, not the Episode API"
+                        )
+                    try:
+                        parsed = json.loads(candidate)
+                        self._read_buffer = b""
+                        _LOGGER.debug("RX ← %s (no-terminator): %s", self._host, parsed)
+                        return parsed
+                    except json.JSONDecodeError:
+                        pass  # incomplete payload — wait for more data
+
+            # ------ 3. Need more data — read with timeout ------
             try:
                 chunk = await asyncio.wait_for(
                     self._reader.read(READ_BUFFER_SIZE),
-                    timeout=COMMAND_TIMEOUT + 3,
+                    timeout=COMMAND_TIMEOUT + 2,
                 )
             except asyncio.TimeoutError as err:
-                # Some stacks send one JSON payload without delimiters.
+                # Last-resort: try whatever is buffered.
                 buffered = self._read_buffer.decode("utf-8", errors="ignore").strip()
                 if buffered:
                     if buffered.startswith("HTTP/"):
@@ -390,7 +423,7 @@ class EpisodeResponseClient:
                     try:
                         parsed = json.loads(buffered)
                         self._read_buffer = b""
-                        _LOGGER.debug("RX ← %s (undelimited): %s", self._host, parsed)
+                        _LOGGER.debug("RX ← %s (timeout-flush): %s", self._host, parsed)
                         return parsed
                     except json.JSONDecodeError:
                         pass
@@ -399,6 +432,7 @@ class EpisodeResponseClient:
             if not chunk:
                 raise ConnectionFailed("Connection closed by amplifier")
             self._read_buffer += chunk
+            # Loop back — step 2 will immediately try to parse the new data.
 
     async def _send_and_receive(
         self, payload: dict[str, Any]
@@ -420,9 +454,9 @@ class EpisodeResponseClient:
         asyncio.Lock so only one command is in-flight at a time.
         """
         async with self._cmd_lock:
-            # Give the device COMMAND_TIMEOUT + 5 s total; inner per-chunk
-            # read uses COMMAND_TIMEOUT + 3 s so it fires before this wrapper.
-            command_timeout = COMMAND_TIMEOUT + 5
+            # Outer wrapper: COMMAND_TIMEOUT + 4 s so it always fires after
+            # the inner per-read timeout (COMMAND_TIMEOUT + 2) if needed.
+            command_timeout = COMMAND_TIMEOUT + 4
             try:
                 response = await asyncio.wait_for(
                     self._send_and_receive(payload),

@@ -22,8 +22,8 @@ RECONNECT_BASE_DELAY: Final = 2  # seconds
 RECONNECT_MAX_DELAY: Final = 300  # 5 minutes
 RECONNECT_JITTER: Final = 1.0  # ±1 second randomization to prevent thundering herd
 HEARTBEAT_INTERVAL: Final = 30  # seconds
-CONNECTION_TIMEOUT: Final = 15  # seconds
-COMMAND_TIMEOUT: Final = 20  # seconds — device can take up to ~10 s per response
+CONNECTION_TIMEOUT: Final = 15  # seconds — login on this device takes ~1–2 s
+COMMAND_TIMEOUT: Final = 8   # seconds — safety net; actual RTT is <1 s with framing fix
 MAX_RECONNECT_ATTEMPTS: Final = 0  # 0 = unlimited
 NULL_TERMINATOR: Final = b"\x00"
 
