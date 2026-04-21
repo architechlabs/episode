@@ -32,6 +32,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+CONF_ENDPOINT = "endpoint"
+
 MAX_DISCOVERY_HOSTS = 512
 MAX_DISCOVERY_VALIDATIONS = 12
 DISCOVERY_PROBE_TIMEOUT = 0.8
@@ -70,6 +72,46 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
         self._amp_name: str = ""
         self._discovered_hosts: list[dict[str, str]] = []
         self._reauth_entry: ConfigEntry | None = None
+
+    def _candidate_ports_for_discovery(self) -> list[int]:
+        """Build a small, bounded list of candidate ports for discovery."""
+        ports: list[int] = []
+        for candidate in (
+            self._port,
+            DEFAULT_PORT,
+            self._port - 1,
+            self._port + 1,
+            8081,
+        ):
+            if 1 <= candidate <= 65535 and candidate not in ports:
+                ports.append(candidate)
+        return ports
+
+    async def _async_try_known_host_other_ports(self) -> dict[str, Any] | None:
+        """Try nearby/common ports when a known host fails on the configured port."""
+        for candidate_port in self._candidate_ports_for_discovery():
+            if candidate_port == self._port:
+                continue
+
+            if not await EpisodeResponseClient.probe_port(
+                self._host,
+                candidate_port,
+                timeout=DISCOVERY_PROBE_TIMEOUT,
+            ):
+                continue
+
+            result = await EpisodeResponseClient.test_connection(
+                self._host,
+                candidate_port,
+                self._username,
+                self._password,
+                attempts=1,
+            )
+            if result.get("success"):
+                self._port = candidate_port
+                return result
+
+        return None
 
     @staticmethod
     def _error_key_from_message(error_msg: str) -> str:
@@ -166,40 +208,44 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
         if not candidate_hosts:
             return []
 
+        candidate_ports = self._candidate_ports_for_discovery()
+
         _LOGGER.debug(
-            "Discovery scanning %d candidate hosts on port %d",
+            "Discovery scanning %d candidate hosts across ports %s",
             len(candidate_hosts),
-            self._port,
+            candidate_ports,
         )
 
-        open_hosts: list[str] = []
+        open_endpoints: list[tuple[str, int]] = []
         probe_sem = asyncio.Semaphore(DISCOVERY_PROBE_CONCURRENCY)
 
-        async def _probe(host: str) -> None:
+        async def _probe(host: str, port: int) -> None:
             async with probe_sem:
                 if await EpisodeResponseClient.probe_port(
                     host,
-                    self._port,
+                    port,
                     timeout=DISCOVERY_PROBE_TIMEOUT,
                 ):
-                    open_hosts.append(host)
+                    open_endpoints.append((host, port))
 
-        await asyncio.gather(*(_probe(host) for host in candidate_hosts))
+        await asyncio.gather(
+            *(_probe(host, port) for host in candidate_hosts for port in candidate_ports)
+        )
 
-        if not open_hosts:
-            _LOGGER.debug("Discovery found no hosts with open TCP port %d", self._port)
+        if not open_endpoints:
+            _LOGGER.debug("Discovery found no open candidate endpoints")
             return []
 
         # Keep discovery snappy even on busy subnets.
-        hosts_to_validate = sorted(open_hosts)[:MAX_DISCOVERY_VALIDATIONS]
+        endpoints_to_validate = sorted(open_endpoints)[:MAX_DISCOVERY_VALIDATIONS]
         discovered: list[dict[str, str]] = []
         validate_sem = asyncio.Semaphore(DISCOVERY_VALIDATE_CONCURRENCY)
 
-        async def _validate(host: str) -> None:
+        async def _validate(host: str, port: int) -> None:
             async with validate_sem:
                 result = await EpisodeResponseClient.test_connection(
                     host,
-                    self._port,
+                    port,
                     self._username,
                     self._password,
                     attempts=1,
@@ -208,13 +254,16 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
                     discovered.append(
                         {
                             "host": host,
+                            "port": str(port),
                             "name": str(result.get("name", "") or "").strip(),
                         }
                     )
 
-        await asyncio.gather(*(_validate(host) for host in hosts_to_validate))
+        await asyncio.gather(
+            *(_validate(host, port) for host, port in endpoints_to_validate)
+        )
 
-        return sorted(discovered, key=lambda item: item["host"])
+        return sorted(discovered, key=lambda item: (item["host"], item.get("port", "")))
 
     @staticmethod
     @callback
@@ -252,7 +301,23 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
                         return await self._async_create_amp_entry()
 
                     error_msg = str(result.get("error", "") or "")
-                    errors["base"] = self._error_key_from_message(error_msg)
+                    error_key = self._error_key_from_message(error_msg)
+
+                    # If host is known but port is wrong, try nearby/common ports.
+                    if error_key == "cannot_connect":
+                        fallback_result = await self._async_try_known_host_other_ports()
+                        if fallback_result and fallback_result.get("success"):
+                            self._amp_name = str(
+                                fallback_result.get("name", "") or ""
+                            ).strip()
+                            _LOGGER.info(
+                                "Recovered connection for %s using discovered port %s",
+                                self._host,
+                                self._port,
+                            )
+                            return await self._async_create_amp_entry()
+
+                    errors["base"] = error_key
                     _LOGGER.warning(
                         "Config flow connection test failed for %s:%s: %s",
                         self._host,
@@ -268,6 +333,7 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
                     elif len(self._discovered_hosts) == 1:
                         only = self._discovered_hosts[0]
                         self._host = only["host"]
+                        self._port = int(only.get("port", str(self._port)))
                         self._amp_name = only.get("name", "")
                         return await self._async_create_amp_entry()
                     else:
@@ -299,21 +365,31 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         if user_input is not None:
-            selected_host = str(user_input[CONF_HOST]).strip()
+            selected_endpoint = str(user_input[CONF_ENDPOINT]).strip()
             selected = next(
-                (item for item in self._discovered_hosts if item["host"] == selected_host),
+                (
+                    item
+                    for item in self._discovered_hosts
+                    if f"{item['host']}:{item.get('port', str(self._port))}"
+                    == selected_endpoint
+                ),
                 None,
             )
             if selected is None:
                 errors["base"] = "invalid_host"
             else:
-                self._host = selected_host
+                self._host = selected["host"]
+                self._port = int(selected.get("port", str(self._port)))
                 self._amp_name = selected.get("name", "")
                 return await self._async_create_amp_entry()
 
         options = {
-            item["host"]: (
-                f"{item['host']} ({item['name']})" if item.get("name") else item["host"]
+            f"{item['host']}:{item.get('port', str(self._port))}": (
+                (
+                    f"{item['host']}:{item.get('port', str(self._port))} ({item['name']})"
+                )
+                if item.get("name")
+                else f"{item['host']}:{item.get('port', str(self._port))}"
             )
             for item in self._discovered_hosts
         }
@@ -322,7 +398,7 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="select_host",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_HOST): vol.In(options),
+                    vol.Required(CONF_ENDPOINT): vol.In(options),
                 }
             ),
             errors=errors,

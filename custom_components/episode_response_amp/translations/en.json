@@ -22,7 +22,7 @@
         "title": "Select Discovered Amplifier",
         "description": "Multiple compatible devices were found. Select the amplifier you want to add.",
         "data": {
-          "host": "Discovered Amplifier"
+          "endpoint": "Discovered Amplifier"
         }
       },
       "reauth_confirm": {
