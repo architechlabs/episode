@@ -425,6 +425,19 @@ class EpisodeResponseClient:
                     self._send_and_receive(payload),
                     timeout=command_timeout,
                 )
+            except asyncio.TimeoutError as err:
+                timeout_err = CommandTimeout(
+                    f"Command timed out after {command_timeout} seconds"
+                )
+                self._consecutive_failures += 1
+                _LOGGER.warning(
+                    "Command failed (%s, attempt %d), scheduling reconnect: %s",
+                    type(timeout_err).__name__,
+                    self._consecutive_failures,
+                    timeout_err,
+                )
+                self._schedule_reconnect()
+                raise timeout_err from err
             except (OSError, ConnectionError, CommandTimeout, ConnectionFailed) as err:
                 self._consecutive_failures += 1
                 _LOGGER.warning(
@@ -457,6 +470,11 @@ class EpisodeResponseClient:
                         self._send_and_receive(payload),
                         timeout=command_timeout,
                     )
+                except asyncio.TimeoutError as err:
+                    self._schedule_reconnect()
+                    raise ConnectionFailed(
+                        f"Retry after re-auth timed out after {command_timeout} seconds"
+                    ) from err
                 except Exception as err:
                     self._schedule_reconnect()
                     raise ConnectionFailed("Retry after re-auth failed") from err
@@ -987,9 +1005,9 @@ class EpisodeResponseClient:
                     "different service, or the amplifier may be saturated with active sessions."
                 )
             except EpisodeAmpError as err:
-                last_error = str(err)
+                last_error = str(err).strip() or err.__class__.__name__
             except Exception as err:  # noqa: BLE001
-                last_error = str(err)
+                last_error = str(err).strip() or err.__class__.__name__
             finally:
                 with suppress(Exception):
                     await client.disconnect()

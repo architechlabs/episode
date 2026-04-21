@@ -116,13 +116,20 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     def _error_key_from_message(error_msg: str) -> str:
         """Map low-level connection errors to user-facing config flow errors."""
-        lowered = error_msg.lower()
+        lowered = error_msg.lower().strip()
+
+        if not lowered:
+            return "api_no_response"
 
         if "http service" in lowered or "not the episode api" in lowered:
             return "wrong_service_on_port"
         if "saturated with active sessions" in lowered or "busy" in lowered:
             return "api_busy"
-        if "timed out reading from amplifier" in lowered:
+        if (
+            "timed out reading from amplifier" in lowered
+            or "timed out" in lowered
+            or "timeouterror" in lowered
+        ):
             return "api_no_response"
         if "password" in lowered or "authentication" in lowered:
             return "invalid_auth"
@@ -333,7 +340,7 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
                         "Config flow connection test failed for %s:%s: %s",
                         self._host,
                         self._port,
-                        error_msg,
+                        error_msg or "<no error detail>",
                     )
                 else:
                     # Auto-discovery path (host left blank)
