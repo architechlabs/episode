@@ -110,6 +110,10 @@ class EpisodeResponseClient:
         self._consecutive_failures: int = 0
         self._total_reconnects: int = 0
 
+        # Identity fetch state — attempt at most once; some firmware revisions
+        # do not implement identity commands and will never reply to them.
+        self._identity_attempted: bool = False
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -496,25 +500,35 @@ class EpisodeResponseClient:
     # ------------------------------------------------------------------
 
     async def get_amp_info(self) -> dict[str, Any]:
-        """Fetch amplifier identification info."""
+        """Fetch amplifier identification info (best-effort).
+
+        Some firmware revisions do not implement every identity command; if the
+        device stops responding mid-fetch the transport will be closed and the
+        loop simply stops.  Callers must not rely on this completing.
+        """
         results: dict[str, Any] = {}
         for cmd_type in (CMD_GET_AMP_NAME, CMD_GET_FIRMWARE, CMD_GET_MAC, CMD_GET_SERIAL):
+            if not self.connected:
+                break  # transport died on a previous command — stop trying
             try:
                 resp = await self.send_command({"type": cmd_type})
                 results[cmd_type] = resp
-            except (ConnectionFailed, CommandTimeout):
-                raise  # propagate connection errors so poll fails fast
             except EpisodeAmpError as err:
                 _LOGGER.debug("Could not fetch %s: %s", cmd_type, err)
         return results
 
     async def get_temperature(self) -> float | None:
-        """Get the amplifier temperature."""
+        """Get the amplifier temperature (best-effort).
+
+        Returns None on any error.  Connection errors are re-raised so the
+        coordinator can mark the poll as failed and reconnect on the next cycle.
+        """
         try:
             resp = await self.send_command({"type": CMD_GET_TEMPERATURE})
             return resp.get("value")
-        except (ConnectionFailed, CommandTimeout):
-            raise  # propagate so the poll fails and triggers reconnect
+        except (ConnectionFailed, CommandTimeout) as err:
+            # Re-raise so the poll fails and the coordinator reconnects.
+            raise ConnectionFailed(str(err)) from err
         except EpisodeAmpError:
             return None
 
@@ -788,9 +802,32 @@ class EpisodeResponseClient:
         if not self.connected:
             raise ConnectionFailed("Not connected to amplifier")
 
-        # Amplifier-level info (only refresh once — cached after first fetch)
-        if not self.state.firmware:
-            await self._fetch_amp_identity()
+        # ----------------------------------------------------------------
+        # Identity fetch — attempted at most once per client instance.
+        #
+        # Many Episode firmware versions do not respond to identity commands
+        # (get_ampname / get_firmware / get_mac / get_serial).  A failed fetch
+        # closes the transport; we reconnect inline before continuing zone
+        # polling so a missing feature does not block state updates.
+        # ----------------------------------------------------------------
+        if not self._identity_attempted:
+            self._identity_attempted = True
+            try:
+                # Generous timeout: login itself can take up to 10 s, so give
+                # identity the same headroom for all four commands.
+                await asyncio.wait_for(self._fetch_amp_identity(), timeout=20.0)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Identity fetch skipped (device may not support it): %s", err)
+
+            # Reconnect if the identity probe destroyed the transport.
+            if not self.connected:
+                _LOGGER.debug("Reconnecting after identity probe…")
+                try:
+                    await self.connect()
+                except Exception as err:  # noqa: BLE001
+                    raise ConnectionFailed(
+                        f"Cannot reconnect after identity probe: {err}"
+                    ) from err
 
         # Standby / mode — always poll these
         try:
