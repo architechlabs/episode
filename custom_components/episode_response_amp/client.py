@@ -102,6 +102,7 @@ class EpisodeResponseClient:
 
         # Buffer for partial reads
         self._read_buffer = b""
+        self._line_terminator = NULL_TERMINATOR
 
         # Connection health tracking
         self._connected_since: float | None = None
@@ -246,11 +247,41 @@ class EpisodeResponseClient:
 
     async def _authenticate(self) -> None:
         """Send login command and validate the response."""
-        response = await self._send_and_receive({
+        payload = {
             "type": CMD_LOGIN,
             "username": self._username,
             "password": self._password,
-        })
+        }
+
+        # Primary framing is NULL-terminated JSON per vendor docs.
+        # Some firmware/control stacks may behave line-delimited; retry once.
+        terminators = [self._line_terminator]
+        if b"\n" not in terminators:
+            terminators.append(b"\n")
+
+        response: dict[str, Any] | None = None
+        last_timeout: CommandTimeout | None = None
+
+        for terminator in terminators:
+            try:
+                await self._send_raw(payload, terminator=terminator)
+                response = await self._read_auth_response()
+                if terminator != self._line_terminator:
+                    _LOGGER.info(
+                        "Switching message terminator to newline for %s:%s",
+                        self._host,
+                        self._port,
+                    )
+                    self._line_terminator = terminator
+                break
+            except CommandTimeout as err:
+                last_timeout = err
+
+        if response is None:
+            if last_timeout is not None:
+                raise last_timeout
+            raise ConnectionFailed("No login response from amplifier")
+
         status = response.get("status", 0)
         if status == STATUS_AUTH_ERROR:
             raise AuthenticationFailed("Invalid username or password")
@@ -270,15 +301,34 @@ class EpisodeResponseClient:
 
         _LOGGER.debug("Authenticated with Episode Response amp")
 
+    async def _read_auth_response(self) -> dict[str, Any]:
+        """Read login response, ignoring any non-status preamble messages."""
+        for _ in range(3):
+            response = await self._read_message()
+            if "status" in response:
+                return response
+            _LOGGER.debug("Ignoring non-status pre-login message: %s", response)
+
+        raise ConnectionFailed("Login response did not include a status field")
+
     # ------------------------------------------------------------------
     # Low-level TCP I/O
     # ------------------------------------------------------------------
 
-    async def _send_raw(self, payload: dict[str, Any]) -> None:
+    async def _send_raw(
+        self,
+        payload: dict[str, Any],
+        *,
+        terminator: bytes | None = None,
+    ) -> None:
         """Serialize and send a JSON payload with NULL terminator."""
         if self._writer is None:
             raise ConnectionFailed("Not connected")
-        data = json.dumps(payload, separators=(",", ":")).encode("utf-8") + NULL_TERMINATOR
+        payload_terminator = self._line_terminator if terminator is None else terminator
+        data = (
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            + payload_terminator
+        )
         _LOGGER.debug("TX → %s: %s", self._host, payload)
         self._writer.write(data)
         await self._writer.drain()
@@ -289,13 +339,25 @@ class EpisodeResponseClient:
             raise ConnectionFailed("Not connected")
 
         while True:
-            # Check buffer for a complete message
+            # Check buffer for complete message (NULL-terminated or line-delimited)
             null_idx = self._read_buffer.find(NULL_TERMINATOR)
-            if null_idx >= 0:
-                msg_bytes = self._read_buffer[:null_idx]
-                self._read_buffer = self._read_buffer[null_idx + 1:]
+            newline_idx = self._read_buffer.find(b"\n")
+            msg_end = -1
+
+            if null_idx >= 0 and (newline_idx < 0 or null_idx < newline_idx):
+                msg_end = null_idx
+            elif newline_idx >= 0:
+                msg_end = newline_idx
+
+            if msg_end >= 0:
+                msg_bytes = self._read_buffer[:msg_end]
+                self._read_buffer = self._read_buffer[msg_end + 1:]
                 msg_str = msg_bytes.decode("utf-8").strip()
                 if msg_str:
+                    if msg_str.startswith("HTTP/"):
+                        raise ConnectionFailed(
+                            "Configured port appears to be an HTTP service, not the Episode API"
+                        )
                     try:
                         parsed = json.loads(msg_str)
                         _LOGGER.debug("RX ← %s: %s", self._host, parsed)
@@ -317,6 +379,20 @@ class EpisodeResponseClient:
                     timeout=max(COMMAND_TIMEOUT + 2, 10),
                 )
             except asyncio.TimeoutError as err:
+                # Some stacks send one JSON payload without delimiters.
+                buffered = self._read_buffer.decode("utf-8", errors="ignore").strip()
+                if buffered:
+                    if buffered.startswith("HTTP/"):
+                        raise ConnectionFailed(
+                            "Configured port appears to be an HTTP service, not the Episode API"
+                        )
+                    try:
+                        parsed = json.loads(buffered)
+                        self._read_buffer = b""
+                        _LOGGER.debug("RX ← %s (undelimited): %s", self._host, parsed)
+                        return parsed
+                    except json.JSONDecodeError:
+                        pass
                 raise CommandTimeout("Timed out reading from amplifier") from err
 
             if not chunk:
@@ -343,10 +419,11 @@ class EpisodeResponseClient:
         asyncio.Lock so only one command is in-flight at a time.
         """
         async with self._cmd_lock:
+            command_timeout = max(COMMAND_TIMEOUT + 2, 8)
             try:
                 response = await asyncio.wait_for(
                     self._send_and_receive(payload),
-                    timeout=COMMAND_TIMEOUT,
+                    timeout=command_timeout,
                 )
             except (OSError, ConnectionError, CommandTimeout, ConnectionFailed) as err:
                 self._consecutive_failures += 1
@@ -378,7 +455,7 @@ class EpisodeResponseClient:
                 try:
                     response = await asyncio.wait_for(
                         self._send_and_receive(payload),
-                        timeout=COMMAND_TIMEOUT,
+                        timeout=command_timeout,
                     )
                 except Exception as err:
                     self._schedule_reconnect()
@@ -892,16 +969,23 @@ class EpisodeResponseClient:
                 await client.connect()
                 # Stop heartbeat since this is just a short-lived probe.
                 client._cancel_heartbeat()  # noqa: SLF001
-                info = await client.get_amp_info()
+
+                # Login success is enough to validate config data.
+                # Name read is best-effort and should not fail setup.
                 try:
                     name = await client.get_amp_name()
                 except EpisodeAmpError:
                     name = ""
-                return {"success": True, "name": name, **info}
+                return {"success": True, "name": name}
             except AuthenticationFailed as err:
                 # Do not retry bad credentials.
                 last_error = str(err)
                 break
+            except CommandTimeout:
+                last_error = (
+                    "Timed out reading from amplifier. The port may be busy, mapped to a "
+                    "different service, or the amplifier may be saturated with active sessions."
+                )
             except EpisodeAmpError as err:
                 last_error = str(err)
             except Exception as err:  # noqa: BLE001

@@ -36,6 +36,9 @@
     },
     "error": {
       "cannot_connect": "Unable to connect to the amplifier. Please check the IP address, port, and that the amplifier is powered on and connected to your network.",
+      "api_no_response": "Connected to the host, but no valid Episode API response was received. Verify the API port, then try again.",
+      "wrong_service_on_port": "The selected port is reachable but appears to be a non-Episode service (for example, web UI only). Use the amplifier's API port.",
+      "api_busy": "The amplifier API appears busy (possibly too many active sessions). Wait a moment, close other control connections, and retry.",
       "invalid_auth": "Invalid username or password. Please check your credentials.",
       "account_locked": "Account is locked due to too many failed login attempts. Please wait a few minutes and try again.",
       "default_password": "The amplifier is still using the default password. Please change it via the amplifier's web interface first, then try again.",

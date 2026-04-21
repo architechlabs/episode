@@ -118,6 +118,12 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
         """Map low-level connection errors to user-facing config flow errors."""
         lowered = error_msg.lower()
 
+        if "http service" in lowered or "not the episode api" in lowered:
+            return "wrong_service_on_port"
+        if "saturated with active sessions" in lowered or "busy" in lowered:
+            return "api_busy"
+        if "timed out reading from amplifier" in lowered:
+            return "api_no_response"
         if "password" in lowered or "authentication" in lowered:
             return "invalid_auth"
         if "locked" in lowered:
@@ -304,7 +310,12 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
                     error_key = self._error_key_from_message(error_msg)
 
                     # If host is known but port is wrong, try nearby/common ports.
-                    if error_key == "cannot_connect":
+                    if error_key in {
+                        "cannot_connect",
+                        "api_no_response",
+                        "wrong_service_on_port",
+                        "api_busy",
+                    }:
                         fallback_result = await self._async_try_known_host_other_ports()
                         if fallback_result and fallback_result.get("success"):
                             self._amp_name = str(
