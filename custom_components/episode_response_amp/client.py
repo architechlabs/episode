@@ -16,6 +16,7 @@ import json
 import logging
 import random
 import time
+from contextlib import suppress
 from collections.abc import Callable
 from typing import Any
 
@@ -313,7 +314,7 @@ class EpisodeResponseClient:
             try:
                 chunk = await asyncio.wait_for(
                     self._reader.read(READ_BUFFER_SIZE),
-                    timeout=COMMAND_TIMEOUT + 2,
+                    timeout=max(COMMAND_TIMEOUT + 2, 10),
                 )
             except asyncio.TimeoutError as err:
                 raise CommandTimeout("Timed out reading from amplifier") from err
@@ -852,31 +853,64 @@ class EpisodeResponseClient:
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def probe_port(host: str, port: int, *, timeout: float = 1.0) -> bool:
+        """Return True when a TCP port accepts a connection within timeout."""
+        writer: asyncio.StreamWriter | None = None
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=timeout,
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+        finally:
+            if writer is not None:
+                with suppress(Exception):
+                    writer.close()
+                    await writer.wait_closed()
+
+    @staticmethod
     async def test_connection(
-        host: str, port: int, username: str, password: str
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        attempts: int = 2,
     ) -> dict[str, Any]:
         """Quick connect → login → get info → disconnect. Returns amp info dict.
 
         Used by the config flow to validate credentials before saving.
         """
-        client = EpisodeResponseClient(host, port, username, password)
-        try:
-            await client.connect()
-            # Stop the heartbeat — we're disconnecting shortly
-            client._cancel_heartbeat()  # noqa: SLF001
-            info = await client.get_amp_info()
+        last_error = "Unknown connection error"
+        total_attempts = max(1, attempts)
+
+        for attempt in range(1, total_attempts + 1):
+            client = EpisodeResponseClient(host, port, username, password)
             try:
-                name = await client.get_amp_name()
-            except EpisodeAmpError:
-                name = ""
-            await client.disconnect()
-            return {"success": True, "name": name, **info}
-        except EpisodeAmpError as err:
-            await client.disconnect()
-            return {"success": False, "error": str(err)}
-        except Exception as err:  # noqa: BLE001
-            try:
-                await client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
-            return {"success": False, "error": str(err)}
+                await client.connect()
+                # Stop heartbeat since this is just a short-lived probe.
+                client._cancel_heartbeat()  # noqa: SLF001
+                info = await client.get_amp_info()
+                try:
+                    name = await client.get_amp_name()
+                except EpisodeAmpError:
+                    name = ""
+                return {"success": True, "name": name, **info}
+            except AuthenticationFailed as err:
+                # Do not retry bad credentials.
+                last_error = str(err)
+                break
+            except EpisodeAmpError as err:
+                last_error = str(err)
+            except Exception as err:  # noqa: BLE001
+                last_error = str(err)
+            finally:
+                with suppress(Exception):
+                    await client.disconnect()
+
+            if attempt < total_attempts:
+                await asyncio.sleep(min(1.0, 0.25 * attempt))
+
+        return {"success": False, "error": last_error}

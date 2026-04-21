@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Connect to Episode Response Amplifier",
-        "description": "Enter the connection details for your Episode Response DSP amplifier. The default TCP port is {default_port}. You can find the IP address in your router's DHCP table or in the amplifier's web interface.",
+        "description": "Enter the connection details for your Episode Response DSP amplifier. The default TCP port is {default_port}. You can find the IP address in your router's DHCP table or in the amplifier's web interface. Leave Host blank to auto-discover on your local network.",
         "data": {
           "host": "Host / IP Address",
           "port": "Port",
@@ -12,10 +12,17 @@
           "password": "Password"
         },
         "data_description": {
-          "host": "The IP address or hostname of your Episode Response amplifier (e.g. 192.168.1.100).",
+          "host": "Optional: IP address or hostname of your Episode Response amplifier (e.g. 192.168.1.100). Leave empty to auto-discover.",
           "port": "TCP API port (default: 8080). Only change this if you have configured a custom port.",
           "username": "Username for the amplifier API (usually 'admin').",
           "password": "Password for the amplifier API."
+        }
+      },
+      "select_host": {
+        "title": "Select Discovered Amplifier",
+        "description": "Multiple compatible devices were found. Select the amplifier you want to add.",
+        "data": {
+          "host": "Discovered Amplifier"
         }
       },
       "reauth_confirm": {
@@ -34,6 +41,7 @@
       "default_password": "The amplifier is still using the default password. Please change it via the amplifier's web interface first, then try again.",
       "invalid_host": "Please enter a valid IP address or hostname.",
       "invalid_port": "Port must be between 1 and 65535.",
+      "cannot_discover": "Could not auto-discover an Episode amplifier on your local network. Enter the Host/IP manually and try again.",
       "unknown": "An unexpected error occurred. Please check the Home Assistant logs for details."
     },
     "abort": {

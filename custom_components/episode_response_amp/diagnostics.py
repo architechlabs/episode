@@ -36,11 +36,7 @@ async def async_get_config_entry_diagnostics(
             "port": client.port,
             "connected": client.connected,
             "uptime_seconds": client.connection_uptime,
-            "last_successful_command": (
-                client.last_successful_command.isoformat()
-                if client.last_successful_command
-                else None
-            ),
+            "last_successful_command_monotonic": client.last_successful_command,
             "consecutive_failures": client.consecutive_failures,
             "total_reconnects": client.total_reconnects,
         },
