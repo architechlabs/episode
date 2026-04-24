@@ -60,6 +60,11 @@ class EpisodeResponseCoordinator(DataUpdateCoordinator[AmplifierState]):
         )
 
     @property
+    def config_entry(self) -> ConfigEntry:
+        """Return the config entry backing this coordinator."""
+        return self._entry
+
+    @property
     def amp_state(self) -> AmplifierState:
         """Return the current amplifier state (shortcut)."""
         return self.client.state

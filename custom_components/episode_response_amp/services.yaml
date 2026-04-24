@@ -340,3 +340,32 @@ set_input_name:
       required: true
       selector:
         text:
+
+link_zone_player:
+  name: Link Zone to Media Player
+  description: >-
+    Link an amplifier zone to an existing Home Assistant media_player entity.
+    When linked, the zone entity will mirror playback state/metadata and forward
+    play/pause/stop/play_media commands to the linked player (useful for Music Assistant).
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: The config entry ID of the amplifier (optional if only one amp).
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone index (0-5).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          mode: box
+    entity_id:
+      name: Media Player Entity ID
+      description: Existing HA `media_player.*` entity id to link, or `none` to clear.
+      required: true
+      selector:
+        text:

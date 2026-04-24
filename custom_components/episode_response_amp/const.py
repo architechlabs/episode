@@ -223,6 +223,7 @@ SERVICE_FACTORY_RESET: Final = "factory_reset"
 SERVICE_SET_AMP_NAME: Final = "set_amp_name"
 SERVICE_SET_OUTPUT_NAME: Final = "set_output_name"
 SERVICE_SET_INPUT_NAME: Final = "set_input_name"
+SERVICE_LINK_ZONE_PLAYER: Final = "link_zone_player"
 
 ALL_SERVICES: Final = [
     SERVICE_SET_DSP_PRESET,
@@ -239,6 +240,7 @@ ALL_SERVICES: Final = [
     SERVICE_SET_AMP_NAME,
     SERVICE_SET_OUTPUT_NAME,
     SERVICE_SET_INPUT_NAME,
+    SERVICE_LINK_ZONE_PLAYER,
 ]
 
 # Attributes for services

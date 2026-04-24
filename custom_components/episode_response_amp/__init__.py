@@ -10,6 +10,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNA
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.storage import Store
 
 from .client import EpisodeResponseClient
 from .const import (
@@ -28,6 +29,7 @@ from .const import (
     MANUFACTURER,
     PLATFORMS,
     SERVICE_FACTORY_RESET,
+    SERVICE_LINK_ZONE_PLAYER,
     SERVICE_REBOOT,
     SERVICE_SET_AMP_NAME,
     SERVICE_SET_BALANCE,
@@ -48,6 +50,36 @@ from .errors import AuthenticationFailed, ConnectionFailed
 _LOGGER = logging.getLogger(__name__)
 
 type EpisodeConfigEntry = ConfigEntry[EpisodeResponseData]
+
+_STORAGE_VERSION = 1
+_LINKS_STORAGE_KEY = f"{DOMAIN}_zone_links"
+
+
+async def _async_load_zone_links(hass: HomeAssistant, entry_id: str) -> dict[int, str]:
+    store = Store[dict[str, Any]](
+        hass, _STORAGE_VERSION, f"{_LINKS_STORAGE_KEY}_{entry_id}"
+    )
+    data = await store.async_load() or {}
+    links: dict[int, str] = {}
+    raw = data.get("links", {})
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                zone = int(k)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(v, str) and v:
+                links[zone] = v
+    return links
+
+
+async def _async_save_zone_links(
+    hass: HomeAssistant, entry_id: str, links: dict[int, str]
+) -> None:
+    store = Store[dict[str, Any]](
+        hass, _STORAGE_VERSION, f"{_LINKS_STORAGE_KEY}_{entry_id}"
+    )
+    await store.async_save({"links": {str(k): v for k, v in links.items()}})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EpisodeConfigEntry) -> bool:
@@ -81,6 +113,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: EpisodeConfigEntry) -> b
     # Store runtime data
     entry.runtime_data = EpisodeResponseData(client, coordinator)
 
+    # Load per-zone linked player mapping (used for Music Assistant passthrough).
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault(entry.entry_id, {})
+    hass.data[DOMAIN][entry.entry_id]["zone_links"] = await _async_load_zone_links(
+        hass, entry.entry_id
+    )
+
     # Register the amplifier device
     _register_device(hass, entry, client)
 
@@ -110,6 +149,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: EpisodeConfigEntry) -> 
         data: EpisodeResponseData = entry.runtime_data
         await data.client.disconnect()
         _LOGGER.info("Episode Response DSP Amplifier unloaded")
+
+    # Keep stored links; just clean runtime memory.
+    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
 
     # Unregister services if this was the last entry
     remaining = hass.config_entries.async_entries(DOMAIN)
@@ -167,6 +210,39 @@ def _register_services(hass: HomeAssistant) -> None:
 
     import voluptuous as vol  # noqa: PLC0415
     from homeassistant.helpers import config_validation as cv  # noqa: PLC0415
+
+    # ---- link_zone_player ----
+    async def handle_link_zone_player(call: ServiceCall) -> None:
+        data = _get_entry_data(hass, call)
+        entry_id = data.coordinator.config_entry.entry_id
+        zone = int(call.data[ATTR_ZONE])
+        target = str(call.data.get("entity_id") or "").strip()
+
+        links: dict[int, str] = hass.data.setdefault(DOMAIN, {}).setdefault(
+            entry_id, {}
+        ).setdefault("zone_links", {})
+
+        if not target or target.lower() in {"none", "null", "unset"}:
+            links.pop(zone, None)
+        else:
+            links[zone] = target
+
+        await _async_save_zone_links(hass, entry_id, links)
+        await data.coordinator.async_request_refresh()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LINK_ZONE_PLAYER,
+        handle_link_zone_player,
+        schema=vol.Schema(
+            {
+                vol.Optional(ATTR_ENTRY_ID): cv.string,
+                vol.Required(ATTR_ZONE): vol.All(vol.Coerce(int), vol.Range(min=0, max=5)),
+                # Entity id of an existing HA media_player to proxy, or "none" to clear.
+                vol.Required("entity_id"): cv.string,
+            }
+        ),
+    )
 
     # ---- set_dsp_preset ----
     async def handle_set_dsp_preset(call: ServiceCall) -> None:

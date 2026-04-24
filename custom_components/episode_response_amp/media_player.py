@@ -21,7 +21,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, DSP_PRESETS, NUM_ZONES, SOURCE_MAP
+from homeassistant.const import ATTR_ENTITY_ID
+
+from .const import DOMAIN, NUM_ZONES, SOURCE_MAP
 from .coordinator import EpisodeResponseCoordinator, EpisodeResponseData
 from .entity import EpisodeResponseEntity
 
@@ -77,6 +79,28 @@ class EpisodeResponseZonePlayer(EpisodeResponseEntity, MediaPlayerEntity):
         return self.coordinator.client.state.zones[self._zone_index]
 
     @property
+    def _linked_player_entity_id(self) -> str | None:
+        """Return a linked HA media_player entity_id for this zone, if configured."""
+        hass = self.hass
+        if hass is None:
+            return None
+        domain_data = hass.data.get(DOMAIN, {})
+        entry_data = domain_data.get(self.coordinator.config_entry.entry_id, {})
+        links: dict[int, str] = entry_data.get("zone_links", {})
+        entity_id = links.get(self._zone_index)
+        if isinstance(entity_id, str) and entity_id.startswith("media_player."):
+            return entity_id
+        return None
+
+    @property
+    def _linked_state(self):
+        """Return the HA State object for the linked player, if available."""
+        entity_id = self._linked_player_entity_id
+        if not entity_id or self.hass is None:
+            return None
+        return self.hass.states.get(entity_id)
+
+    @property
     def name(self) -> str:
         """Return the zone name."""
         zone_name = self._zone.name
@@ -92,6 +116,19 @@ class EpisodeResponseZonePlayer(EpisodeResponseEntity, MediaPlayerEntity):
             return MediaPlayerState.OFF
         if not self._zone.enabled:
             return MediaPlayerState.OFF
+
+        linked = self._linked_state
+        if linked is not None:
+            # Mirror linked player's state where possible.
+            if linked.state == "playing":
+                return MediaPlayerState.PLAYING
+            if linked.state == "paused":
+                return MediaPlayerState.PAUSED
+            if linked.state in {"idle", "standby", "on"}:
+                return MediaPlayerState.IDLE
+            if linked.state == "off":
+                return MediaPlayerState.IDLE
+
         if self._zone.muted:
             return MediaPlayerState.IDLE
         return MediaPlayerState.ON
@@ -132,13 +169,11 @@ class EpisodeResponseZonePlayer(EpisodeResponseEntity, MediaPlayerEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes for the zone."""
         zone = self._zone
-        return {
+        attrs: dict[str, Any] = {
             "zone_index": self._zone_index,
             "volume_db": zone.volume_db,
             "source_index": zone.source1,
             "source2_index": zone.source2,
-            "dsp_preset": DSP_PRESETS.get(zone.dsp_preset, str(zone.dsp_preset)),
-            "dsp_preset_index": zone.dsp_preset,
             "bass": zone.bass,
             "treble": zone.treble,
             "balance": zone.balance,
@@ -148,6 +183,53 @@ class EpisodeResponseZonePlayer(EpisodeResponseEntity, MediaPlayerEntity):
             "bridge_mode": zone.bridge,
             "zone_enabled": zone.enabled,
         }
+        linked_id = self._linked_player_entity_id
+        if linked_id:
+            attrs["linked_player"] = linked_id
+        return attrs
+
+    @property
+    def supported_features(self) -> int:
+        """Dynamically add transport features when linked."""
+        base = int(self._attr_supported_features)
+        if self._linked_player_entity_id:
+            base |= (
+                MediaPlayerEntityFeature.PLAY
+                | MediaPlayerEntityFeature.PAUSE
+                | MediaPlayerEntityFeature.STOP
+                | MediaPlayerEntityFeature.NEXT_TRACK
+                | MediaPlayerEntityFeature.PREVIOUS_TRACK
+                | MediaPlayerEntityFeature.PLAY_MEDIA
+            )
+        return base
+
+    @property
+    def media_title(self) -> str | None:
+        linked = self._linked_state
+        if linked is None:
+            return None
+        return linked.attributes.get("media_title")
+
+    @property
+    def media_artist(self) -> str | None:
+        linked = self._linked_state
+        if linked is None:
+            return None
+        return linked.attributes.get("media_artist")
+
+    @property
+    def media_album_name(self) -> str | None:
+        linked = self._linked_state
+        if linked is None:
+            return None
+        return linked.attributes.get("media_album_name")
+
+    @property
+    def media_image_url(self) -> str | None:
+        linked = self._linked_state
+        if linked is None:
+            return None
+        return linked.attributes.get("entity_picture")
 
     # ------------------------------------------------------------------
     # Commands
@@ -228,6 +310,63 @@ class EpisodeResponseZonePlayer(EpisodeResponseEntity, MediaPlayerEntity):
         self._zone.enabled = False
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
+
+    async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
+        """Forward play_media to the linked player if configured."""
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            raise ValueError("No linked media player configured for this zone")
+        await self.hass.services.async_call(
+            "media_player",
+            "play_media",
+            {
+                ATTR_ENTITY_ID: linked,
+                "media_content_type": media_type,
+                "media_content_id": media_id,
+                **kwargs,
+            },
+            blocking=True,
+        )
+
+    async def async_media_play(self) -> None:
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "media_player", "media_play", {ATTR_ENTITY_ID: linked}, blocking=True
+        )
+
+    async def async_media_pause(self) -> None:
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "media_player", "media_pause", {ATTR_ENTITY_ID: linked}, blocking=True
+        )
+
+    async def async_media_stop(self) -> None:
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "media_player", "media_stop", {ATTR_ENTITY_ID: linked}, blocking=True
+        )
+
+    async def async_media_next_track(self) -> None:
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "media_player", "media_next_track", {ATTR_ENTITY_ID: linked}, blocking=True
+        )
+
+    async def async_media_previous_track(self) -> None:
+        linked = self._linked_player_entity_id
+        if not linked or self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "media_player", "media_previous_track", {ATTR_ENTITY_ID: linked}, blocking=True
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:

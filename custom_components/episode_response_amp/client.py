@@ -91,6 +91,24 @@ def _extract_all_indexed(resp: dict[str, Any]) -> dict[int, Any]:
     return {}
 
 
+def _extract_scalar(resp: dict[str, Any], default: Any) -> Any:
+    """Return a scalar value from a response that may be bulk-indexed.
+
+    Some firmware versions return bulk lists even for non-indexed getters
+    (e.g. standby/mode). In those cases, we prefer index 0 when present.
+    """
+    value = resp.get("value", default)
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict) and item.get("index") == 0:
+                return item.get("value", default)
+        # Fallback: first entry's value if shaped like [{"index":..,"value":..}]
+        if value and isinstance(value[0], dict):
+            return value[0].get("value", default)
+        return default
+    return value
+
+
 class EpisodeResponseClient:
     """Persistent async TCP client for Episode Response amplifiers."""
 
@@ -596,7 +614,13 @@ class EpisodeResponseClient:
         """
         try:
             resp = await self.send_command({"type": CMD_GET_TEMPERATURE})
-            return resp.get("value")
+            raw = _extract_scalar(resp, None)
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
         except (ConnectionFailed, CommandTimeout) as err:
             # Re-raise so the poll fails and the coordinator reconnects.
             raise ConnectionFailed(str(err)) from err
@@ -787,7 +811,7 @@ class EpisodeResponseClient:
     async def get_standby(self) -> bool:
         """Get amplifier standby state."""
         resp = await self.send_command({"type": "get_standby"})
-        return bool(resp.get("value", 0))
+        return bool(_extract_scalar(resp, 0))
 
     async def set_mode(self, mode: int) -> dict[str, Any]:
         """Set amplifier operating mode (0=On,1=Standby,2=VTrig,3=Audio)."""
@@ -799,7 +823,7 @@ class EpisodeResponseClient:
     async def get_mode(self) -> int:
         """Get amplifier operating mode."""
         resp = await self.send_command({"type": "get_mode"})
-        return resp.get("value", 0)
+        return int(_extract_scalar(resp, 0))
 
     async def set_amp_name(self, name: str) -> dict[str, Any]:
         """Set amplifier name."""
