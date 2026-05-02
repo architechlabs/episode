@@ -39,8 +39,6 @@ class EpisodeResponseData:
 class EpisodeResponseCoordinator(DataUpdateCoordinator[AmplifierState]):
     """Coordinator that polls the Episode Response amplifier for state updates."""
 
-    config_entry: EpisodeConfigEntry
-
     def __init__(
         self,
         hass: HomeAssistant,
@@ -50,19 +48,25 @@ class EpisodeResponseCoordinator(DataUpdateCoordinator[AmplifierState]):
     ) -> None:
         """Initialize the coordinator."""
         self.client = client
-        self._entry = entry
 
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_{entry.entry_id}",
-            update_interval=timedelta(seconds=poll_interval),
-        )
-
-    @property
-    def config_entry(self) -> ConfigEntry:
-        """Return the config entry backing this coordinator."""
-        return self._entry
+        try:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=f"{DOMAIN}_{entry.entry_id}",
+                update_interval=timedelta(seconds=poll_interval),
+                config_entry=entry,
+            )
+        except TypeError:
+            # Older Home Assistant cores did not accept config_entry in the
+            # DataUpdateCoordinator constructor.
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=f"{DOMAIN}_{entry.entry_id}",
+                update_interval=timedelta(seconds=poll_interval),
+            )
+            self.config_entry = entry
 
     @property
     def amp_state(self) -> AmplifierState:

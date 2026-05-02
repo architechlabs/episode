@@ -245,6 +245,12 @@ class EpisodeResponseClient:
             self.state.connected = False
             await self._close_transport()
             raise
+        except CommandTimeout as err:
+            self.state.connected = False
+            await self._close_transport()
+            raise ConnectionFailed(
+                f"Timed out while connecting to {self._host}:{self._port}: {err}"
+            ) from err
         except (OSError, asyncio.TimeoutError, ConnectionError) as err:
             self.state.connected = False
             await self._close_transport()
@@ -285,6 +291,8 @@ class EpisodeResponseClient:
         """Close the underlying TCP transport."""
         self._connected = False
         self._authenticated = False
+        self.state.connected = False
+        self._connected_since = None
         writer = self._writer
         self._writer = None
         self._reader = None

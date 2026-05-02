@@ -103,12 +103,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EpisodeConfigEntry) -> b
             f"Cannot connect to Episode Response amplifier at {host}:{port}"
         ) from err
 
-    coordinator = EpisodeResponseCoordinator(
-        hass, client, entry, poll_interval=poll_interval
-    )
+    try:
+        coordinator = EpisodeResponseCoordinator(
+            hass, client, entry, poll_interval=poll_interval
+        )
 
-    # Do an initial full poll
-    await coordinator.async_config_entry_first_refresh()
+        # Do an initial full poll
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await client.disconnect()
+        raise
 
     # Store runtime data
     entry.runtime_data = EpisodeResponseData(client, coordinator)

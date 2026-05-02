@@ -125,6 +125,10 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
             return "wrong_service_on_port"
         if "saturated with active sessions" in lowered or "busy" in lowered:
             return "api_busy"
+        if "default password" in lowered:
+            return "default_password"
+        if "locked" in lowered:
+            return "account_locked"
         if (
             "timed out reading from amplifier" in lowered
             or "timed out" in lowered
@@ -133,10 +137,6 @@ class EpisodeResponseConfigFlow(ConfigFlow, domain=DOMAIN):
             return "api_no_response"
         if "password" in lowered or "authentication" in lowered:
             return "invalid_auth"
-        if "locked" in lowered:
-            return "account_locked"
-        if "default password" in lowered:
-            return "default_password"
         if (
             "connect" in lowered
             or "timeout" in lowered
